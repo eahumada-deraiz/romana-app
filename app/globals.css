@@ -1,0 +1,59 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,700&family=JetBrains+Mono:wght@400;600&display=swap');
+
+:root {
+  --bg-deep: #070d09;
+  --bg-mid: #0d1a12;
+  --bg-surface: #12261a;
+  --bg-card: rgba(255,255,255,0.015);
+  --bg-card-hover: rgba(255,255,255,0.03);
+  --bg-card-active: rgba(82,183,136,0.05);
+  --border: rgba(255,255,255,0.04);
+  --border-active: rgba(82,183,136,0.15);
+  --green-1: #52b788;
+  --green-2: #40916c;
+  --green-3: #2d6a4f;
+  --green-dim: #3f5e4c;
+  --green-dimmer: #2d4a38;
+  --text: #cddccd;
+  --text-dim: #4a6b56;
+  --text-dimmer: #3a5444;
+  --yellow: #e9c46a;
+  --yellow-dim: #6a5a2a;
+  --red: #ff6b6b;
+  --orange: #e76f51;
+  --mono: 'JetBrains Mono', monospace;
+  --sans: 'DM Sans', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  font-family: var(--sans);
+  background: linear-gradient(170deg, var(--bg-deep), var(--bg-mid) 40%, var(--bg-surface));
+  color: var(--text);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+input::placeholder, textarea::placeholder { color: var(--text-dimmer); }
+
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.05); border-radius: 3px; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes fadeUp { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:translateY(0); } }
+@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.5; } }
+
+/* Mobile-first responsive */
+@media (max-width: 640px) {
+  .stats-grid { grid-template-columns: repeat(2, 1fr) !important; }
+  .records-layout { flex-direction: column !important; }
+  .records-list { flex: 1 !important; max-height: none !important; }
+  .detail-panel { position: static !important; max-height: none !important; flex: 1 !important; }
+  .detail-grid { grid-template-columns: 1fr 1fr !important; }
+  .tipo-buttons { flex-direction: column !important; }
+  .info-grid { grid-template-columns: 1fr !important; }
+  .filter-row { flex-direction: column !important; gap: 6px !important; align-items: stretch !important; }
+  .filter-row select { width: 100% !important; }
+}
