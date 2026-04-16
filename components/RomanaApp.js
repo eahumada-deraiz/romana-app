@@ -105,7 +105,7 @@ export default function RomanaApp(){
           const res=await fetch('/api/extract',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pdf_base64:b64})});
           const json=await res.json();
           if(!res.ok||!json.ok)throw new Error(json.error||'Error extrayendo');
-          setRecs(prev=>{const u=sortR(prev.map(r=>r.id===rec.id?{...r,st:'extraido',extracted:json.data,uf:{gen:'',gest:'',tipo:'gestor_generador'},history:[]}:r));saveLS(SK.RECS,u);return u;});
+          setRecs(prev=>{const u=sortR(prev.map(r=>r.id===rec.id?{...r,st:'extraido',extracted:json.data,uf:{gen:'',gest:'',tipo:'gestor_generador'},history:[],b64:b64}:r));saveLS(SK.RECS,u.map(x=>({...x,b64:undefined})));return u;});
         }catch(err){
           setRecs(prev=>{const u=prev.map(r=>r.id===rec.id?{...r,st:'error',err:err.message}:r);saveLS(SK.RECS,u);return u;});
         }
@@ -117,12 +117,39 @@ export default function RomanaApp(){
   const onDrop=useCallback(e=>{e.preventDefault();setDrag(false);handleFiles(e.dataTransfer.files);},[handleFiles]);
   const updUF=useCallback((id,f)=>setRecs(p=>p.map(r=>r.id===id?{...r,uf:{...r.uf,...f}}:r)),[]);
 
-  const doConfirm=useCallback(id=>{
+  const doConfirm=useCallback(async id=>{
     const r=recs.find(x=>x.id===id);if(!r?.uf)return;
     if(r.uf.gen&&!gens.includes(r.uf.gen)){const u=[...gens,r.uf.gen];saveGens(u);}
     if(r.uf.gest&&!gests.includes(r.uf.gest)){const u=[...gests,r.uf.gest];saveGest(u);}
-    const u=recs.map(x=>x.id===id?{...x,st:'confirmado'}:x);
-    saveRecs(u);setSel(null);setEditing(null);
+
+    // Send to Google Sheets + Drive
+    const ext=r.extracted||{};
+    try{
+      const payload={
+        data:{
+          fecha:ext.fecha||'',
+          hora_entrada:timeFrom(ext.fecha_hora_entrada),
+          hora_salida:timeFrom(ext.fecha_hora_salida),
+          informe_n:ext.informe_n||'',
+          patente:ext.patente||'',
+          conductor:ext.conductor||'',
+          generador:r.uf.gen||'',
+          gestor:r.uf.gest||'',
+          tipo_residuo:ext.observaciones||'',
+          peso_bruto_entrada:ext.peso_bruto_entrada||0,
+          peso_bruto_salida:ext.peso_bruto_salida||0,
+          peso_neto_kg:ext.peso_neto_kg||0,
+          empresa_generadora:r.uf.gen||'',
+          empresa_gestora:r.uf.gest||'',
+        },
+        pdf_base64:r.b64||null,
+        pdf_nombre:r.fn||'ticket.pdf',
+      };
+      fetch('/api/registrar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).catch(()=>{});
+    }catch(e){}
+
+    const u=recs.map(x=>x.id===id?{...x,st:'confirmado',b64:undefined}:x);
+    saveRecs(u.map(x=>({...x,b64:undefined})));setRecs(u);setSel(null);setEditing(null);
   },[recs,gens,gests,saveRecs,saveGens,saveGest]);
 
   const startEdit=useCallback(id=>{
