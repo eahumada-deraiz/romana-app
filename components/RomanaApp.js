@@ -310,8 +310,45 @@ export default function RomanaApp() {
   const [bulkSending, setBulkSending] = useState(false);
   const [toast, setToast] = useState(null);
   const [obsInput, setObsInput] = useState('');
+const [tipoResiduo, setTipoResiduo] = useState('');
+  const [tiposDisponibles, setTiposDisponibles] = useState([]);
+  const [m3Input, setM3Input] = useState('');
   const [processedHashes, setProcessedHashes] = useState(new Set());
   const fRef = useRef(null);
+
+  // Archivo PDF tab
+  const [archFiltGen,   setArchFiltGen]   = useState('');
+  const [archFiltGest,  setArchFiltGest]  = useState('');
+  const [archFiltDesde, setArchFiltDesde] = useState('');
+  const [archFiltHasta, setArchFiltHasta] = useState('');
+  const [archResults,   setArchResults]   = useState([]);
+  const [archLoading,   setArchLoading]   = useState(false);
+  const [archSelected,  setArchSelected]  = useState(new Set());
+  const [archEmail,     setArchEmail]     = useState('');
+  const [archSending,   setArchSending]   = useState(false);
+
+  // Financiero tab
+  const [epGens,        setEpGens]        = useState([]);
+  const [epGensLoaded,  setEpGensLoaded]  = useState(false);
+  const [epSelGens,     setEpSelGens]     = useState({});
+  const [epUnificar,    setEpUnificar]    = useState(false);
+  const [epDesde,       setEpDesde]       = useState('');
+  const [epHasta,       setEpHasta]       = useState('');
+  const [epUF,          setEpUF]          = useState('');
+  const [epUFStatus,    setEpUFStatus]    = useState('');
+  const [epFeriados,    setEpFeriados]    = useState([]);
+  const [epFeriadosSel, setEpFeriadosSel] = useState({});
+  const [epExtras,      setEpExtras]      = useState([]);
+  const [epObs,         setEpObs]         = useState('');
+  const [epCorreos,     setEpCorreos]     = useState('');
+  const [epCC,          setEpCC]          = useState('');
+  const [epBCC,         setEpBCC]         = useState('');
+  const [epAsunto,      setEpAsunto]      = useState('');
+  const [epCuerpo,      setEpCuerpo]      = useState('');
+  const [epGenerando,   setEpGenerando]   = useState(false);
+  const [epResultado,   setEpResultado]   = useState(null);
+  const [epEnviando,    setEpEnviando]    = useState(false);
+  const [epError,       setEpError]       = useState('');
 
   // ---- AUTH ----
   useEffect(() => {
@@ -434,15 +471,25 @@ export default function RomanaApp() {
     if (saveTimeoutRef.current[rec.id]) clearTimeout(saveTimeoutRef.current[rec.id]);
     saveTimeoutRef.current[rec.id] = setTimeout(() => { saveAssignment(rec); }, 1000);
   }, [saveAssignment]);
+// Cargar tipos de residuo cuando cambia generador/gestor
+  const cargarTiposResiduo = useCallback(async (gen, gest) => {
+    if (!gen && !gest) { setTiposDisponibles([]); return; }
+    const res = await api({ action: 'romana_tipos_residuo', generador: gen || '', gestor: gest || '' });
+    if (res.ok) setTiposDisponibles(res.tipos || []);
+  }, []);
 
   const updUFAndSave = useCallback((id, f) => {
     setRecs(p => {
       const updated = p.map(r => r.id === id ? { ...r, uf: { ...r.uf, ...f } } : r);
       const rec = updated.find(r => r.id === id);
       if (rec && rec.st === 'extraido') debouncedSave(rec);
+      if (f.gen !== undefined || f.gest !== undefined) {
+        cargarTiposResiduo(rec?.uf?.gen || '', rec?.uf?.gest || '');
+        setTipoResiduo('');
+      }
       return updated;
     });
-  }, [debouncedSave]);
+  }, [debouncedSave, cargarTiposResiduo]);
 
   // ---- CONFIRM SINGLE ----
   const doConfirm = useCallback(async (id, obs) => {
@@ -469,7 +516,8 @@ export default function RomanaApp() {
           conductor: ext.conductor || '',
           generador: r.uf.gen || '',
           gestor: r.uf.gest || '',
-          tipo_residuo: ext.observaciones || '',
+          tipo_residuo: tipoResiduo || ext.observaciones || '',
+          m3: m3Input ? parseFloat(m3Input) : 0,
           peso_bruto_entrada: ext.peso_bruto_entrada || 0,
           peso_bruto_salida: ext.peso_bruto_salida || 0,
           peso_neto_kg: ext.peso_neto_kg || 0,
@@ -490,8 +538,8 @@ export default function RomanaApp() {
       setRecs(prev => prev.map(x => x.id === id ? { ...x, st: 'envio_error', err: err.message } : x));
       setToast({ message: `Error: ${err.message}`, type: 'error' });
     }
-    setSel(null); setEditing(null); setObsInput('');
-  }, [recs, gens, gests]);
+    setSel(null); setEditing(null); setObsInput(''); setTipoResiduo(''); setM3Input('');
+  }, [recs, gens, gests, tipoResiduo, m3Input]);
 
   // ---- CONFIRM BULK ----
   const doBulkConfirm = useCallback(async () => {
@@ -584,6 +632,128 @@ export default function RomanaApp() {
   // ---- TOGGLE SELECT ----
   const toggleSelect = useCallback((id, e) => { e.stopPropagation(); setSelected(p => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; }); }, []);
 
+  // ---- FINANCIERO / EP ----
+  const cargarGensEP = useCallback(async () => {
+    if (epGensLoaded) return;
+    const res = await api({ action: 'romana_gens_ep' });
+    if (res.ok) {
+      setEpGens(res.generadores || []);
+      const sel = {};
+      (res.generadores || []).forEach(g => { sel[g.hoja + '|' + g.local] = true; });
+      setEpSelGens(sel);
+      setEpGensLoaded(true);
+    }
+  }, [epGensLoaded]);
+
+  const epAutoUF = useCallback(async () => {
+    if (!epHasta) { setEpUFStatus('Ingresa fecha Hasta primero'); return; }
+    setEpUFStatus('Consultando...');
+    const parts = epHasta.split('-');
+    const fecha = parts[2] + '/' + parts[1] + '/' + parts[0];
+    const res = await api({ action: 'romana_uf', fecha });
+    if (res.ok && res.uf) { setEpUF(String(res.uf)); setEpUFStatus('Obtenido'); }
+    else setEpUFStatus('No disponible');
+  }, [epHasta]);
+
+  const epDetectarFeriados = useCallback(async () => {
+    const selList = Object.entries(epSelGens).filter(([,v]) => v).map(([k]) => {
+      const [hoja, local] = k.split('|');
+      return { hoja, local };
+    });
+    if (!selList.length || !epDesde || !epHasta) return;
+    const toFecha = d => d.split('-').reverse().join('/');
+    const res = await api({ action: 'romana_feriados_ep', generadores: selList, desde: toFecha(epDesde), hasta: toFecha(epHasta) });
+    if (res.ok) {
+      setEpFeriados(res.feriados || []);
+      const sel = {};
+      (res.feriados || []).forEach((f, i) => { sel[i] = true; });
+      setEpFeriadosSel(sel);
+    }
+  }, [epSelGens, epDesde, epHasta]);
+
+  const epAgregarExtra = useCallback(() => {
+    const selList = Object.entries(epSelGens).filter(([,v]) => v).map(([k]) => k.split('|')[1]);
+    setEpExtras(p => [...p, { generador: selList[0] || 'TODOS', concepto: '', cantidad: '', moneda: 'CLP', valorUnitario: '' }]);
+  }, [epSelGens]);
+
+  const epGenerar = useCallback(async () => {
+    const selList = Object.entries(epSelGens).filter(([,v]) => v).map(([k]) => {
+      const [hoja, local] = k.split('|');
+      return { hoja, local };
+    });
+    if (!selList.length || !epDesde || !epHasta || !epUF) {
+      setEpError('Completa generadores, periodo y valor UF');
+      return;
+    }
+    setEpError('');
+    setEpGenerando(true);
+    setEpResultado(null);
+    const toFecha = d => d.split('-').reverse().join('/');
+    const feriadosDescartados = epFeriados.filter((_, i) => !epFeriadosSel[i]).map(f => ({ fecha: f.fecha, local: f.local }));
+    const extras = epExtras.filter(e => e.concepto && e.cantidad && e.valorUnitario).map(e => ({
+      generador: e.generador, concepto: e.concepto,
+      cantidad: parseFloat(e.cantidad), moneda: e.moneda,
+      valorUnitario: parseFloat(e.valorUnitario)
+    }));
+    const res = await api({
+      action: 'romana_generar_ep',
+      generadores: selList,
+      fechaInicio: toFecha(epDesde),
+      fechaFin: toFecha(epHasta),
+      valorUF: parseFloat(epUF),
+      lineasExtra: extras,
+      observaciones: epObs,
+      unificarPorGestor: epUnificar,
+      feriadosDescartados
+    });
+    setEpGenerando(false);
+    if (res.ok) setEpResultado(res);
+    else setEpError(res.error || 'Error al generar');
+  }, [epSelGens, epDesde, epHasta, epUF, epFeriados, epFeriadosSel, epExtras, epObs, epUnificar]);
+
+  const epEnviar = useCallback(async () => {
+    if (!epResultado || !epCorreos) return;
+    setEpEnviando(true);
+    const res = await api({
+      action: 'romana_enviar_ep',
+      fileIds: epResultado.resultados.map(r => r.fileId),
+      correos: epCorreos,
+      cc: epCC,
+      bcc: epBCC,
+      resumenes: epResultado.resumenes,
+      periodo: epResultado.periodo,
+      asunto: epAsunto || ('Estado de Pago - ' + epResultado.periodo),
+      cuerpoCorreo: epCuerpo
+    });
+    setEpEnviando(false);
+    if (res.ok) setToast({ message: 'Correo enviado a ' + epCorreos, type: 'success' });
+    else setToast({ message: res.error || 'Error al enviar', type: 'error' });
+  }, [epResultado, epCorreos, epCC, epBCC, epAsunto, epCuerpo]);
+
+  // ---- ARCHIVO PDF ----
+  const buscarPdfs = useCallback(async () => {
+    setArchLoading(true);
+    setArchResults([]);
+    setArchSelected(new Set());
+    const params = { action: 'romana_buscar_pdfs' };
+    if (archFiltGen)   params.generador  = archFiltGen;
+    if (archFiltGest)  params.gestor     = archFiltGest;
+    if (archFiltDesde) params.fechaDesde = archFiltDesde.split('-').reverse().join('/');
+    if (archFiltHasta) params.fechaHasta = archFiltHasta.split('-').reverse().join('/');
+    const res = await api(params);
+    setArchResults(res.registros || []);
+    setArchLoading(false);
+  }, [archFiltGen, archFiltGest, archFiltDesde, archFiltHasta]);
+
+  const enviarPdfs = useCallback(async () => {
+    if (!archEmail || archSelected.size === 0) return;
+    setArchSending(true);
+    const res = await api({ action: 'romana_enviar_pdfs', correo: archEmail, fileIds: [...archSelected] });
+    setArchSending(false);
+    if (res.ok) setToast({ message: `Enviados ${res.enviados} PDF(s) a ${res.correo}`, type: 'success' });
+    else setToast({ message: res.error || 'Error al enviar', type: 'error' });
+  }, [archEmail, archSelected]);
+
   // ---- COMPUTED ----
   const dfP = dateFrom ? new Date(dateFrom + 'T00:00:00') : null;
   const dtP = dateTo ? new Date(dateTo + 'T23:59:59') : null;
@@ -656,7 +826,7 @@ export default function RomanaApp() {
       <div style={{ padding: '0 16px', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
           <div style={{ display: 'flex' }}>
-            {[{ k: 'upload', l: 'Subir PDFs' }, { k: 'records', l: `Registros (${vis.length})` }, { k: 'rankings', l: 'Rankings' }, ...(auth.rol === 'administrador' ? [{ k: 'admin', l: 'Admin' }] : [])].map(t => (
+            {[{ k: 'upload', l: 'Subir PDFs' }, { k: 'records', l: `Registros (${vis.length})` }, { k: 'rankings', l: 'Rankings' }, { k: 'archivo', l: 'Archivo PDF' }, ...(auth.rol === 'administrador' ? [{ k: 'financiero', l: 'Financiero' }, { k: 'dashboard', l: 'Dashboard' }] : []), ...(auth.rol === 'administrador' ? [{ k: 'admin', l: 'Admin' }] : [])].map(t => (
               <button key={t.k} onClick={() => setTab(t.k)} style={{ padding: '10px 14px', fontSize: 12, fontWeight: tab === t.k ? 700 : 400, color: tab === t.k ? '#52b788' : '#3f5e4c', background: 'transparent', border: 'none', borderBottom: tab === t.k ? '2px solid #52b788' : '2px solid transparent', cursor: 'pointer', fontFamily: 'inherit' }}>{t.l}</button>
             ))}
           </div>
@@ -720,7 +890,7 @@ export default function RomanaApp() {
                       <div style={{ fontSize: 9, color: '#4a6b56' }}>{items.length} ticket{items.length > 1 ? 's' : ''} — {(items.reduce((s, r) => s + (r.extracted?.peso_neto_kg || 0), 0) / 1000).toFixed(3)} ton</div>
                     </div>
                     {items.map(r => (
-                      <div key={r.id} onClick={() => { if (r.st !== 'procesando') { setSel(r.id); setEditing(null); setObsInput(''); } }} style={{ background: sel === r.id ? 'rgba(82,183,136,0.05)' : 'rgba(255,255,255,0.015)', border: `1px solid ${sel === r.id ? 'rgba(82,183,136,0.15)' : selected.has(r.id) ? 'rgba(233,196,106,0.2)' : 'rgba(255,255,255,0.04)'}`, borderRadius: 8, padding: '10px 12px', cursor: r.st === 'procesando' ? 'default' : 'pointer', transition: 'all .12s', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+                      <div key={r.id} onClick={() => { if (r.st !== 'procesando') { setSel(r.id); setEditing(null); setObsInput(''); setTipoResiduo(''); setM3Input(''); cargarTiposResiduo(r.uf?.gen, r.uf?.gest); } }} style={{ background: sel === r.id ? 'rgba(82,183,136,0.05)' : 'rgba(255,255,255,0.015)', border: `1px solid ${sel === r.id ? 'rgba(82,183,136,0.15)' : selected.has(r.id) ? 'rgba(233,196,106,0.2)' : 'rgba(255,255,255,0.04)'}`, borderRadius: 8, padding: '10px 12px', cursor: r.st === 'procesando' ? 'default' : 'pointer', transition: 'all .12s', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
                         {r.st === 'extraido' && <input type="checkbox" checked={selected.has(r.id)} onChange={e => toggleSelect(r.id, e)} onClick={e => e.stopPropagation()} style={{ marginRight: 8, accentColor: '#52b788' }} />}
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3, flexWrap: 'wrap' }}>
@@ -777,6 +947,22 @@ export default function RomanaApp() {
                           </div>
                           {cur.uf?.tipo !== 'solo_gestor' && <div style={{ marginBottom: 10 }}><div style={lbl}>GENERADOR</div><input list="dlg" value={cur.uf?.gen || ''} onChange={e => updUFAndSave(cur.id, { gen: e.target.value.toUpperCase() })} placeholder="Ej: COCA COLA" style={inp} /><datalist id="dlg">{gens.map(g => <option key={g} value={g} />)}</datalist></div>}
                           {cur.uf?.tipo !== 'solo_generador' && <div style={{ marginBottom: 14 }}><div style={lbl}>GESTOR</div><input list="dlt" value={cur.uf?.gest || ''} onChange={e => updUFAndSave(cur.id, { gest: e.target.value.toUpperCase() })} placeholder="Ej: ECORILES" style={inp} /><datalist id="dlt">{gests.map(g => <option key={g} value={g} />)}</datalist></div>}
+{tiposDisponibles.length > 0 && (
+                            <div style={{ marginBottom: 10 }}>
+                              <div style={lbl}>TIPO DE RESIDUO</div>
+                              <select value={tipoResiduo} onChange={e => setTipoResiduo(e.target.value)} style={inp}>
+                                <option value="">— Seleccionar tipo —</option>
+                                {tiposDisponibles.map(t => <option key={t} value={t}>{t}</option>)}
+                              </select>
+                              {cur.extracted?.observaciones && <div style={{ fontSize: 9, color: '#6a5a2a', marginTop: 3 }}>Del PDF: {cur.extracted.observaciones}</div>}
+                            </div>
+                          )}
+                          {tiposDisponibles.length > 0 && (
+                            <div style={{ marginBottom: 10 }}>
+                              <div style={lbl}>M3 (solo si aplica cobro por m3)</div>
+                              <input type="number" value={m3Input} onChange={e => setM3Input(e.target.value)} placeholder="Dejar vacío si no aplica" style={inp} />
+                            </div>
+                          )}
                           <div style={{ marginBottom: 14 }}><div style={lbl}>Observaciones del operador (opcional)</div><input value={obsInput} onChange={e => setObsInput(e.target.value)} placeholder="Ej: Carga parcial, segundo viaje..." style={inp} /></div>
                           <button onClick={() => doConfirm(cur.id, obsInput)} disabled={!canC(cur)} style={{ width: '100%', padding: '12px', fontSize: 14, fontWeight: 700, background: canC(cur) ? 'linear-gradient(135deg,#2d6a4f,#40916c)' : 'rgba(255,255,255,0.03)', color: canC(cur) ? '#fff' : '#2d4a38', border: 'none', borderRadius: 8, cursor: canC(cur) ? 'pointer' : 'default', opacity: canC(cur) ? 1 : .4 }}>Confirmar y enviar a Sheets</button>
                         </div>
@@ -861,6 +1047,259 @@ export default function RomanaApp() {
               </div>
             )}
           </div>
+        )}
+
+        {/* ARCHIVO TAB */}
+        {tab === 'archivo' && (
+          <div style={{ animation: 'fadeUp .2s ease' }}>
+            <div style={{ background: 'rgba(255,255,255,0.015)', border: '1px solid rgba(255,255,255,0.04)', borderRadius: 12, padding: 16, marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#52b788', marginBottom: 12 }}>Buscar tickets de pesaje (PDF)</div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <div><div style={lbl}>Generador</div>
+                  <select value={archFiltGen} onChange={e => setArchFiltGen(e.target.value)} style={{ ...inpSm, width: 160 }}>
+                    <option value="">Todos</option>
+                    {gens.map(g => <option key={g} value={g}>{g}</option>)}
+                  </select>
+                </div>
+                <div><div style={lbl}>Gestor</div>
+                  <select value={archFiltGest} onChange={e => setArchFiltGest(e.target.value)} style={{ ...inpSm, width: 160 }}>
+                    <option value="">Todos</option>
+                    {gests.map(g => <option key={g} value={g}>{g}</option>)}
+                  </select>
+                </div>
+                <div><div style={lbl}>Desde</div>
+                  <input type="date" value={archFiltDesde} onChange={e => setArchFiltDesde(e.target.value)} style={{ ...inpSm, width: 'auto' }} />
+                </div>
+                <div><div style={lbl}>Hasta</div>
+                  <input type="date" value={archFiltHasta} onChange={e => setArchFiltHasta(e.target.value)} style={{ ...inpSm, width: 'auto' }} />
+                </div>
+                <button onClick={buscarPdfs} disabled={archLoading} style={{ padding: '6px 18px', fontSize: 12, fontWeight: 700, background: 'linear-gradient(135deg,#2d6a4f,#40916c)', color: '#fff', border: 'none', borderRadius: 6, cursor: archLoading ? 'default' : 'pointer', fontFamily: 'inherit', opacity: archLoading ? 0.6 : 1 }}>
+                  {archLoading ? 'Buscando...' : 'Buscar'}
+                </button>
+                {(archFiltGen || archFiltGest || archFiltDesde || archFiltHasta) && (
+                  <button onClick={() => { setArchFiltGen(''); setArchFiltGest(''); setArchFiltDesde(''); setArchFiltHasta(''); setArchResults([]); setArchSelected(new Set()); }} style={{ fontSize: 10, padding: '5px 10px', background: 'rgba(255,255,255,0.04)', color: '#6b8f7b', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 5, cursor: 'pointer', fontFamily: 'inherit' }}>Limpiar</button>
+                )}
+              </div>
+            </div>
+            {archResults.length > 0 && (
+              <div style={{ background: 'rgba(255,255,255,0.015)', border: '1px solid rgba(255,255,255,0.04)', borderRadius: 12, padding: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#52b788' }}>{archResults.length} resultado{archResults.length !== 1 ? 's' : ''}</div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button onClick={() => setArchSelected(new Set(archResults.map(r => r.pdf_id)))} style={{ ...chipBtn, fontSize: 10 }}>Seleccionar todos</button>
+                    <button onClick={() => setArchSelected(new Set())} style={{ ...chipBtn, fontSize: 10 }}>Ninguno</button>
+                  </div>
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                    <thead>
+                      <tr style={{ background: 'rgba(0,0,0,0.2)' }}>
+                        <th style={{ padding: '8px 6px', width: 32 }}></th>
+                        {['Fecha','N° Informe','Generador','Gestor','Archivo','Descargar'].map(h => (
+                          <th key={h} style={{ padding: '8px 6px', textAlign: 'left', color: '#4a6b56', fontWeight: 600 }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {archResults.map((r, i) => (
+                        <tr key={r.pdf_id} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', background: archSelected.has(r.pdf_id) ? 'rgba(82,183,136,0.06)' : i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)' }}>
+                          <td style={{ padding: '7px 6px', textAlign: 'center' }}>
+                            <input type="checkbox" checked={archSelected.has(r.pdf_id)} onChange={() => setArchSelected(p => { const n = new Set(p); n.has(r.pdf_id) ? n.delete(r.pdf_id) : n.add(r.pdf_id); return n; })} />
+                          </td>
+                          <td style={{ padding: '7px 6px', color: '#cddccd' }}>{r.fecha}</td>
+                          <td style={{ padding: '7px 6px', color: '#9ab8a8', fontFamily: "'JetBrains Mono',monospace" }}>{r.informe_n || '—'}</td>
+                          <td style={{ padding: '7px 6px', color: '#52b788' }}>{r.generador}</td>
+                          <td style={{ padding: '7px 6px', color: '#40916c' }}>{r.gestor}</td>
+                          <td style={{ padding: '7px 6px', color: '#4a6b56', fontSize: 10 }}>{r.archivo}</td>
+                          <td style={{ padding: '7px 6px' }}>
+                            <a href={r.pdf_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, padding: '4px 10px', background: 'rgba(82,183,136,0.08)', color: '#52b788', border: '1px solid rgba(82,183,136,0.15)', borderRadius: 4, textDecoration: 'none', display: 'inline-block' }}>↓ PDF</a>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {archSelected.size > 0 && (
+                  <div style={{ marginTop: 14, padding: '12px 14px', background: 'rgba(82,183,136,0.04)', border: '1px solid rgba(82,183,136,0.1)', borderRadius: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#52b788' }}>{archSelected.size} seleccionado{archSelected.size !== 1 ? 's' : ''}</span>
+                    <input type="email" placeholder="Correo destino" value={archEmail} onChange={e => setArchEmail(e.target.value)} style={{ ...inpSm, width: 220 }} />
+                    <button onClick={enviarPdfs} disabled={archSending || !archEmail} style={{ padding: '6px 16px', fontSize: 11, fontWeight: 700, background: (!archEmail || archSending) ? 'rgba(255,255,255,0.05)' : 'linear-gradient(135deg,#2d6a4f,#40916c)', color: (!archEmail || archSending) ? '#3f5e4c' : '#fff', border: 'none', borderRadius: 6, cursor: (!archEmail || archSending) ? 'default' : 'pointer', fontFamily: 'inherit' }}>
+                      {archSending ? 'Enviando...' : `Enviar ${archSelected.size} PDF${archSelected.size !== 1 ? 's' : ''} por email`}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+            {!archLoading && archResults.length === 0 && (archFiltGen || archFiltGest || archFiltDesde || archFiltHasta) && (
+              <div style={{ textAlign: 'center', padding: 30, color: '#3f5e4c', fontSize: 12 }}>Sin resultados para los filtros seleccionados.</div>
+            )}
+            {!archLoading && !archFiltGen && !archFiltGest && !archFiltDesde && !archFiltHasta && (
+              <div style={{ textAlign: 'center', padding: 30, color: '#3f5e4c', fontSize: 12 }}>Selecciona filtros y presiona Buscar para encontrar tickets.</div>
+            )}
+          </div>
+        )}
+
+        {/* FINANCIERO TAB */}
+        {tab === 'financiero' && auth.rol === 'administrador' && (() => {
+          if (!epGensLoaded) cargarGensEP();
+          const porHoja = {};
+          epGens.forEach(g => { if (!porHoja[g.hoja]) porHoja[g.hoja] = []; porHoja[g.hoja].push(g.local); });
+          const sBtn = { padding: '8px 18px', fontSize: 12, fontWeight: 700, background: 'linear-gradient(135deg,#2d6a4f,#40916c)', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit' };
+          const sCard = { background: 'rgba(255,255,255,0.015)', border: '1px solid rgba(255,255,255,0.04)', borderRadius: 12, padding: 16, marginBottom: 12 };
+          return (
+            <div style={{ animation: 'fadeUp .2s ease', maxWidth: 700 }}>
+              {!epGensLoaded && <div style={{ color: '#52b788', fontSize: 12 }}>Cargando generadores...</div>}
+              {epGensLoaded && (
+                <>
+                  {/* GENERADORES */}
+                  <div style={sCard}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#52b788', marginBottom: 8 }}>Generadores</div>
+                    <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                      <button onClick={() => { const s={}; epGens.forEach(g=>{s[g.hoja+'|'+g.local]=true;}); setEpSelGens(s); }} style={chipBtn}>Todos</button>
+                      <button onClick={() => setEpSelGens({})} style={chipBtn}>Ninguno</button>
+                    </div>
+                    {Object.entries(porHoja).map(([hoja, locals]) => (
+                      <div key={hoja}>
+                        <div style={{ fontSize: 10, color: '#4a6b56', marginTop: 6, marginBottom: 3 }}>{hoja}</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                          {locals.map(local => {
+                            const k = hoja + '|' + local;
+                            return (
+                              <label key={k} style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(255,255,255,0.03)', padding: '3px 8px', borderRadius: 4, cursor: 'pointer' }}>
+                                <input type="checkbox" checked={!!epSelGens[k]} onChange={e => setEpSelGens(p => ({ ...p, [k]: e.target.checked }))} />
+                                {local}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, fontSize: 11, color: '#52b788', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={epUnificar} onChange={e => setEpUnificar(e.target.checked)} />
+                      Unificar por gestor (una hoja por gestor)
+                    </label>
+                  </div>
+
+                  {/* PERIODO + UF */}
+                  <div style={sCard}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#52b788', marginBottom: 8 }}>Periodo y valor UF</div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                      <div><div style={lbl}>Desde</div><input type="date" value={epDesde} onChange={e => setEpDesde(e.target.value)} style={{ ...inpSm, width: 'auto' }} /></div>
+                      <div><div style={lbl}>Hasta</div><input type="date" value={epHasta} onChange={e => setEpHasta(e.target.value)} style={{ ...inpSm, width: 'auto' }} /></div>
+                      <div style={{ flex: 1, minWidth: 120 }}><div style={lbl}>Valor UF {epUFStatus && <span style={{ color: '#4a6b56', fontWeight: 400 }}>— {epUFStatus}</span>}</div><input type="number" value={epUF} onChange={e => setEpUF(e.target.value)} placeholder="Ej: 38500" style={{ ...inpSm, width: '100%' }} /></div>
+                      <button onClick={epAutoUF} style={chipBtn}>Obtener UF auto</button>
+                    </div>
+                  </div>
+
+                  {/* FERIADOS */}
+                  <div style={sCard}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#52b788', marginBottom: 8 }}>Feriados</div>
+                    <button onClick={epDetectarFeriados} style={chipBtn}>Detectar feriados en periodo</button>
+                    {epFeriados.length > 0 && (
+                      <div style={{ marginTop: 8, background: 'rgba(233,196,106,0.04)', border: '1px solid rgba(233,196,106,0.1)', borderRadius: 6, padding: 8 }}>
+                        <div style={{ fontSize: 10, color: '#8a7a3a', marginBottom: 4 }}>Desmarca los que no correspondan como feriado</div>
+                        {epFeriados.map((f, i) => (
+                          <label key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#c4a84a', marginBottom: 3, cursor: 'pointer' }}>
+                            <input type="checkbox" checked={!!epFeriadosSel[i]} onChange={e => setEpFeriadosSel(p => ({ ...p, [i]: e.target.checked }))} />
+                            {f.fecha} — {f.local} ({f.dia})
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    {epFeriados.length === 0 && <div style={{ fontSize: 11, color: '#3f5e4c', marginTop: 6 }}>Sin feriados detectados aún.</div>}
+                  </div>
+
+                  {/* CONCEPTOS EXTRA */}
+                  <div style={sCard}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#52b788', marginBottom: 8 }}>Conceptos adicionales</div>
+                    {epExtras.map((ex, i) => (
+                      <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                        <select value={ex.generador} onChange={e => setEpExtras(p => p.map((x,j) => j===i ? {...x,generador:e.target.value} : x))} style={{ ...inpSm, width: 130 }}>
+                          {Object.entries(epSelGens).filter(([,v])=>v).map(([k]) => <option key={k} value={k.split('|')[1]}>{k.split('|')[1]}</option>)}
+                          <option value="TODOS">TODOS</option>
+                        </select>
+                        <input placeholder="Concepto" value={ex.concepto} onChange={e => setEpExtras(p => p.map((x,j) => j===i ? {...x,concepto:e.target.value} : x))} style={{ ...inpSm, flex: 1, minWidth: 80 }} />
+                        <input placeholder="Cant." type="number" value={ex.cantidad} onChange={e => setEpExtras(p => p.map((x,j) => j===i ? {...x,cantidad:e.target.value} : x))} style={{ ...inpSm, width: 55 }} />
+                        <select value={ex.moneda} onChange={e => setEpExtras(p => p.map((x,j) => j===i ? {...x,moneda:e.target.value} : x))} style={{ ...inpSm, width: 60 }}>
+                          <option>CLP</option><option>UF</option><option>UTM</option>
+                        </select>
+                        <input placeholder="Valor unit." type="number" value={ex.valorUnitario} onChange={e => setEpExtras(p => p.map((x,j) => j===i ? {...x,valorUnitario:e.target.value} : x))} style={{ ...inpSm, width: 90 }} />
+                        <button onClick={() => setEpExtras(p => p.filter((_,j) => j!==i))} style={{ fontSize: 12, padding: '4px 8px', background: 'rgba(255,60,60,0.08)', color: '#ff6b6b', border: '1px solid rgba(255,60,60,0.15)', borderRadius: 4, cursor: 'pointer', fontFamily: 'inherit' }}>×</button>
+                      </div>
+                    ))}
+                    <button onClick={epAgregarExtra} style={chipBtn}>+ Agregar concepto</button>
+                  </div>
+
+                  {/* OBS + CORREO */}
+                  <div style={sCard}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#52b788', marginBottom: 8 }}>Observaciones y envio</div>
+                    <div style={lbl}>Observaciones</div>
+                    <textarea value={epObs} onChange={e => setEpObs(e.target.value)} placeholder="Instrucciones especiales, descuentos, notas..." style={{ ...inp, minHeight: 48, marginBottom: 10 }} />
+                    <div style={lbl}>Para — destinatarios (separados por coma)</div>
+                    <input value={epCorreos} onChange={e => setEpCorreos(e.target.value)} placeholder="correo@ejemplo.com" style={{ ...inp, marginBottom: 8 }} />
+                    <div style={lbl}>CC — Copia (separados por coma)</div>
+                    <input value={epCC} onChange={e => setEpCC(e.target.value)} placeholder="copia@ejemplo.com" style={{ ...inp, marginBottom: 8 }} />
+                    <div style={lbl}>CCO — Copia oculta (separados por coma)</div>
+                    <input value={epBCC} onChange={e => setEpBCC(e.target.value)} placeholder="oculto@ejemplo.com" style={{ ...inp, marginBottom: 8 }} />
+                    <div style={lbl}>Asunto del correo</div>
+                    <input value={epAsunto} onChange={e => setEpAsunto(e.target.value)} placeholder="Estado de Pago — Marzo 2026" style={{ ...inp, marginBottom: 8 }} />
+                    <div style={lbl}>Mensaje del correo</div>
+                    <textarea value={epCuerpo} onChange={e => setEpCuerpo(e.target.value)} placeholder="Estimado/a, adjuntamos el estado de pago..." style={{ ...inp, minHeight: 48 }} />
+                  </div>
+
+                  {/* GENERAR */}
+                  {epError && <div style={{ fontSize: 11, color: '#ff6b6b', marginBottom: 8, padding: '6px 10px', background: 'rgba(255,60,60,0.08)', borderRadius: 6 }}>{epError}</div>}
+                  <button onClick={epGenerar} disabled={epGenerando} style={{ ...sBtn, width: '100%', padding: 12, fontSize: 14, opacity: epGenerando ? 0.6 : 1 }}>
+                    {epGenerando ? 'Generando...' : 'GENERAR ESTADO DE PAGO'}
+                  </button>
+
+                  {/* RESULTADO */}
+                  {epResultado && (
+                    <div style={{ ...sCard, marginTop: 12, background: 'rgba(82,183,136,0.04)', border: '1px solid rgba(82,183,136,0.12)' }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#52b788', marginBottom: 8 }}>Generado — {epResultado.periodo}</div>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, marginBottom: 10 }}>
+                        <thead><tr style={{ background: 'rgba(0,0,0,0.2)' }}>
+                          {['Generador','Viajes','Feriados','Ton','Total CLP'].map(h => <th key={h} style={{ padding: '6px 8px', textAlign: 'left', color: '#4a6b56', fontWeight: 600 }}>{h}</th>)}
+                        </tr></thead>
+                        <tbody>
+                          {epResultado.resumenes.map((r, i) => (
+                            <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                              <td style={{ padding: '5px 8px', color: '#cddccd' }}>{r.generador}</td>
+                              <td style={{ padding: '5px 8px', color: '#9ab8a8', textAlign: 'center' }}>{r.viajes}</td>
+                              <td style={{ padding: '5px 8px', color: '#9ab8a8', textAlign: 'center' }}>{r.feriados}</td>
+                              <td style={{ padding: '5px 8px', color: '#9ab8a8', textAlign: 'right' }}>{r.toneladas}</td>
+                              <td style={{ padding: '5px 8px', color: '#52b788', textAlign: 'right', fontWeight: 700 }}>${Math.round(r.totalCLP).toLocaleString('es-CL')}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {epResultado.resultados.map((r, i) => (
+                        <a key={i} href={r.url} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-block', marginBottom: 8, fontSize: 12, padding: '6px 14px', background: 'rgba(82,183,136,0.08)', color: '#52b788', border: '1px solid rgba(82,183,136,0.2)', borderRadius: 6, textDecoration: 'none' }}>
+                          ↓ Descargar Excel
+                        </a>
+                      ))}
+                      {epCorreos && (
+                        <div style={{ marginTop: 8 }}>
+                          <button onClick={epEnviar} disabled={epEnviando} style={{ ...sBtn, opacity: epEnviando ? 0.6 : 1 }}>
+                            {epEnviando ? 'Enviando...' : 'Enviar por correo'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* DASHBOARD TAB */}
+        {tab === 'dashboard' && auth.rol === 'administrador' && (
+          <iframe
+            src="https://deraiz-dashboard.vercel.app/"
+            style={{ width: '100%', height: 'calc(100vh - 110px)', border: 'none', display: 'block' }}
+            title="Dashboard IA De Raiz"
+          />
         )}
 
         {/* ADMIN TAB */}
