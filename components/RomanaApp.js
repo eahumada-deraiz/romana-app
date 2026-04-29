@@ -419,8 +419,8 @@ const [tipoResiduo, setTipoResiduo] = useState('');
         const json = await res.json();
         if (!res.ok || !json.ok) throw new Error(json.error || 'Error extrayendo');
 
-        // Save to Sheets (ROMANA_COLA)
-        const saveRes = await api({
+        // Save to Sheets (ROMANA_COLA) — incluye PDF para guardarlo en Drive
+const saveRes = await api({
           action: 'romana_guardar',
           id: id,
           fn: file.name,
@@ -430,13 +430,16 @@ const [tipoResiduo, setTipoResiduo] = useState('');
           gestor: '',
           tipo: 'gestor_generador',
           operador: auth?.usuario || '',
+          pdf_base64: b64,
+          pdf_nombre: file.name,
         });
 
         // Update local state
         setRecs(prev => sortR(prev.map(r => r.id === id ? {
           ...r, st: 'extraido', extracted: json.data,
           uf: { gen: '', gest: '', tipo: 'gestor_generador' },
-          _b64: b64, // Keep temporarily for confirm
+          pdf_file_id: saveRes?.pdfFileId || '',
+          _b64: b64,
         } : r)));
 
       } catch (err) {
@@ -526,6 +529,7 @@ const [tipoResiduo, setTipoResiduo] = useState('');
         },
         pdf_base64: r._b64 || null,
         pdf_nombre: r.fn || 'ticket.pdf',
+        pdf_file_id: r.pdf_file_id || '',
       });
 
       if (result.ok) {
@@ -559,6 +563,7 @@ const [tipoResiduo, setTipoResiduo] = useState('');
           action: 'romana_confirmar', id: r.id, obsOperador: '',
           data: { fecha: ext.fecha || '', hora_entrada: timeFrom(ext.fecha_hora_entrada), hora_salida: timeFrom(ext.fecha_hora_salida), informe_n: ext.informe_n || '', patente: ext.patente || '', conductor: ext.conductor || '', generador: r.uf.gen || '', gestor: r.uf.gest || '', tipo_residuo: ext.observaciones || '', peso_bruto_entrada: ext.peso_bruto_entrada || 0, peso_bruto_salida: ext.peso_bruto_salida || 0, peso_neto_kg: ext.peso_neto_kg || 0, empresa_generadora: r.uf.gen || '', empresa_gestora: r.uf.gest || '' },
           pdf_base64: r._b64 || null, pdf_nombre: r.fn || 'ticket.pdf',
+          pdf_file_id: r.pdf_file_id || '',
         });
         if (result.ok) { setRecs(prev => prev.map(x => x.id === id ? { ...x, st: 'confirmado', _b64: undefined } : x)); ok++; }
         else throw new Error(result.error);
